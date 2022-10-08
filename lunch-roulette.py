@@ -357,7 +357,7 @@ def send_match_emails(users, lunch_date):
             match = users_by_email[user[match_column_header]]
             args = [
                 "powershell.exe",
-                ".\lunch-roulette-email.ps1",
+                ".\\lunch-roulette-email.ps1",
                 "-email",
                 f"'{user['email']}'",
                 "-friendlyName",
