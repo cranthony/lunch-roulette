@@ -21,22 +21,16 @@ add-type -assembly "System.Runtime.Interopservices"
 try
 {
   $outlook = [Runtime.Interopservices.Marshal]::GetActiveObject('Outlook.Application')
-  $outlookWasAlreadyRunning = $true
 }
 catch
 {
-  try
-  {
-    $outlook = New-Object -comobject Outlook.Application
-    $outlookWasAlreadyRunning = $false
-  }
-  catch
-  {
-    write-host "You must exit Outlook first."
-    exit
-  }
+  # The example that I followed would start Outlook if it wasn't running, but
+  # I don't really want that.  I don't want to accidentally lock up my computer
+  # by starting a script that sends 100 emails, and watching each start and
+  # stop Outlook.
+  Write-Host "Is Outlook running?  We expect it to be running already so that"
+  Write-Host "it's easy to call this script many times in a row."
 }
-$namespace = $Outlook.GetNameSpace("MAPI")
 
 # Generate the email from a template.
 $template = get-childitem $emailTemplatePath -Filter "$emailTemplateName"
@@ -50,9 +44,9 @@ $message.To = $email
 
 # Replace all of the keywords that we care about
 $pronouns = @{
-  'male' = @{'possessive' = 'his'; 'subject' = 'he'}
-  'female' = @{'possessive' = 'her'; 'subject' = 'she'}
-  'nonbinary' = @{'possessive' = 'their'; 'subject' = 'they'}
+  'male' = @{'possessive' = 'his'; 'subject' = 'he'; 'object' = 'him'}
+  'female' = @{'possessive' = 'her'; 'subject' = 'she'; 'object' = 'her'}
+  'nonbinary' = @{'possessive' = 'their'; 'subject' = 'they'; 'object' = 'them'}
 }
 # Note that no replacement key is contained within another key.  For example,
 # if FriendlyName and OtherFriendlyName were keys, then it's possible that,
@@ -66,6 +60,7 @@ $replacements = @{
   'VarOtherFullName' = $otherFullName
   'VarOtherPossessivePronoun' = ($pronouns.$otherGender).possessive
   'VarOtherSubjectPronoun' = ($pronouns.$otherGender).subject
+  'VarOtherObjectPronoun' = ($pronouns.$otherGender).object
 }
 $replacements.GetEnumerator() | ForEach-Object {
   $message.Subject = $message.Subject.Replace($_.Key, $_.Value)
@@ -73,9 +68,3 @@ $replacements.GetEnumerator() | ForEach-Object {
 }
 
 $message.Send()
-
-# Close outlook if it wasn't opened before running this script
-if ($outlookWasAlreadyRunning -eq $false)
-{
-    Get-Process "*outlook*" | Stop-Process –force
-}

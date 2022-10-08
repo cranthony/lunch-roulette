@@ -1,0 +1,5 @@
+# VS Code settings don't need to be shared.
+/.vscode
+
+# Our virtual environment can be regenerated with the directions in the README.
+/venv
