@@ -9,11 +9,9 @@ param(
   [Parameter(Mandatory=$true)] [ValidateNotNullOrEmpty()] [String]$otherEmail,
   [Parameter(Mandatory=$true)] [ValidateNotNullOrEmpty()] [String]$otherFriendlyName,
   [Parameter(Mandatory=$true)] [ValidateNotNullOrEmpty()] [String]$otherFullName,
-  [Parameter(Mandatory=$true)] [ValidateSet('male', 'female', 'nonbinary')] [String]$otherGender
+  [Parameter(Mandatory=$true)] [ValidateSet('male', 'female', 'nonbinary')] [String]$otherGender,
+  [Parameter(Mandatory=$true)] [ValidateNotNullOrEmpty()] [String]$template
 )
-
-$emailTemplatePath = ".\"
-$emailTemplateName = "emba-lunch-roulette-email-template.oft"
 
 # Connect to Outlook.
 Add-Type -assembly "Microsoft.Office.Interop.Outlook"
@@ -33,12 +31,8 @@ catch
 }
 
 # Generate the email from a template.
-$template = get-childitem $emailTemplatePath -Filter "$emailTemplateName"
-if ((Test-Path $template.FullName) -ne $true) {
-  write-host "Couldn't find template $template"
-  exit
-}
-$message = $outlook.CreateItemFromTemplate($template.FullName.ToString())
+$templatePath = (Resolve-Path $template).Path
+$message = $outlook.CreateItemFromTemplate($templatePath)
 
 $message.To = $email
 

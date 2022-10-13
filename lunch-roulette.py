@@ -43,15 +43,27 @@ def main():
         "--send-emails",
         action="store_true",
         help="If specified, emails will be sent for the given lunch date.  This"
-        " assumes that a CSV file named like YYYYMMDD.csv for the given lunch"
-        " date exists.  The intention is for that CSV to be generated and"
-        " reviewed before sending emails.",
+        " assumes that the XLSX file has a column named like match_YYYYMMDD for"
+        " the given lunch date.  The intention is for the XLSX file to be"
+        " filled in and reviewed before sending emails.",
     )
     action_group.add_argument(
         "--roulette",
         action="store_true",
-        help="Match people for the lunch date and generate a CSV file named"
-        " like YYYYMMDD.csv with the results, for review.",
+        help="Match people for the lunch date and add a column to the XLSX file"
+        " named like match_YYYYMMDD with the results, for review.",
+    )
+    action_group.add_argument(
+        "--dry-run-send-emails",
+        action="store_true",
+        help="Like --send-emails, but prints the commands that send the emails"
+        " without actually executing them.  So emails will not be sent.",
+    )
+    parser.add_argument(
+        "--template",
+        help="Path to the Outlook template to use with"
+        " lunch-roulette-email.ps1.  This argument is required if --send-emails"
+        " or --dry-run-send-emails is specified."
     )
     parser.add_argument(
         "--debug",
@@ -78,8 +90,16 @@ def main():
                 if args.out:
                     out_filename = args.out
                 do_roulette(workbook, args.lunch_date, out_filename)
-            elif args.send_emails:
-                send_emails(workbook, args.lunch_date)
+            elif args.send_emails or args.dry_run_send_emails:
+                assert args.template, (
+                    "--template argument is required when sending emails"
+                )
+                send_emails(
+                    workbook,
+                    args.lunch_date,
+                    args.template,
+                    dry_run=args.dry_run_send_emails,
+                )
     except PermissionError:
         logger.error(
             "Permission error!  Make sure that the XLSX file is not already"
@@ -106,8 +126,8 @@ def do_roulette(workbook, lunch_date, out_filename):
 
     # We don't really support frequency at the moment.  We only filter out those
     # users that have a frequency of 0.
-    users = {k:v for k,v in users.items() if v['frequency']}
-    assert all([v['frequency'] in [None,0,1] for v in users.values()])
+    users = {k: v for k, v in users.items() if v["frequency"]}
+    assert all([v["frequency"] in [None, 0, 1] for v in users.values()])
 
     matches = match_users(users)
     logger.debug(f"Matches: {matches}")
@@ -122,7 +142,7 @@ def do_roulette(workbook, lunch_date, out_filename):
     )
 
 
-def send_emails(workbook, lunch_date):
+def send_emails(workbook, lunch_date, template_path, dry_run=False):
     """
     Send the lunch roulette match emails.
     """
@@ -152,7 +172,7 @@ def send_emails(workbook, lunch_date):
     )
     logger.debug(f"Parsed {len(users)} users: {users}")
 
-    send_match_emails(users, lunch_date)
+    send_match_emails(users, lunch_date, template_path, dry_run=dry_run)
 
 
 def parse_worksheet_columns(worksheet):
@@ -226,9 +246,7 @@ def load_users(worksheet, columns, load_columns):
     # information
 
     columns = {
-        k: v
-        for k, v in columns.items()
-        if k in load_columns + ["email"]
+        k: v for k, v in columns.items() if k in load_columns + ["email"]
     }
 
     row_number = 2  # Skip the header row (see parse_worksheet_columns)
@@ -339,13 +357,13 @@ def update_worksheet_with_matches(
         worksheet.cell(row=match[1], column=match_column).value = emails[0]
 
 
-def send_match_emails(users, lunch_date):
+def send_match_emails(users, lunch_date, template_path, dry_run=False):
     """
     Send emails to each person about their match.
     """
     # Make a dictionary mapping the users' email address back to their row
     # numbers.  We'll use this for getting the match information.
-    users_by_email = {v['email']: v for v in users.values()}
+    users_by_email = {v["email"]: v for v in users.values()}
     match_column_header = make_match_column_header(lunch_date)
 
     # Send emails serially, because I doubt that Powershell and Outlook support
@@ -372,19 +390,25 @@ def send_match_emails(users, lunch_date):
                 f"'{match['full_name']}'",
                 "-otherGender",
                 f"'{match['gender']}'",
+                "-template",
+                f"'{template_path}'",
             ]
             logger.info(f"Sending email to {user['email']}...")
 
-            completed_process = subprocess.run(args)
-            if completed_process.returncode != 0:
-                logger.error(f"Failed to send email to {user['email']}")
-                send_failures.append(user)
+            if dry_run:
+                print(" ".join(args))
+            else:
+                completed_process = subprocess.run(args)
+                if completed_process.returncode != 0:
+                    logger.error(f"Failed to send email to {user['email']}")
+                    send_failures.append(user)
 
     if send_failures:
         logger.error(
             "Failed to send emails to the following users:"
-            + "\n  ".join([u['email'] for u in send_failures])
+            + "\n  ".join([u["email"] for u in send_failures])
         )
+
 
 if __name__ == "__main__":
     main()
