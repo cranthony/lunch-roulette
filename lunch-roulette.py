@@ -34,19 +34,10 @@ def main():
     )
     parser.add_argument(
         "--lunch-date",
-        required=True,
         type=lambda x: datetime.strptime(x, r"%Y%m%d").date(),
         help="The date of the lunch we're rouletting for, in YYYYMMDD format",
     )
     action_group = parser.add_mutually_exclusive_group(required=True)
-    action_group.add_argument(
-        "--send-emails",
-        action="store_true",
-        help="If specified, emails will be sent for the given lunch date.  This"
-        " assumes that the XLSX file has a column named like match_YYYYMMDD for"
-        " the given lunch date.  The intention is for the XLSX file to be"
-        " filled in and reviewed before sending emails.",
-    )
     action_group.add_argument(
         "--roulette",
         action="store_true",
@@ -54,16 +45,31 @@ def main():
         " named like match_YYYYMMDD with the results, for review.",
     )
     action_group.add_argument(
-        "--dry-run-send-emails",
+        "--send-matches",
         action="store_true",
-        help="Like --send-emails, but prints the commands that send the emails"
-        " without actually executing them.  So emails will not be sent.",
+        help="If specified, emails will be sent for the given lunch date.  This"
+        " assumes that the XLSX file has a column named like match_YYYYMMDD for"
+        " the given lunch date.  The intention is for the XLSX file to be"
+        " filled in and reviewed before sending emails.",
+    )
+    action_group.add_argument(
+        "--send-announcement",
+        action="store_true",
+        help="Send an announcement email to all users that are subscribed to"
+        " lunch roulette.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="If specified, we'll print the commands that we would execute"
+        " without actually executing them.  So emails will not be sent, for"
+        " example.",
     )
     parser.add_argument(
         "--template",
         help="Path to the Outlook template to use with"
         " lunch-roulette-email.ps1.  This argument is required if --send-emails"
-        " or --dry-run-send-emails is specified."
+        " or --dry-run-send-emails is specified.",
     )
     parser.add_argument(
         "--debug",
@@ -86,19 +92,37 @@ def main():
         ) as workbook:
             logger.debug(f"Opened XLSX file {args.xlsx}")
             if args.roulette:
+                assert (
+                    not args.dry_run
+                ), "--dry-run is not supported for --roulette"
+                assert (
+                    args.lunch_date
+                ), "--lunch-date argument is required for --roulette"
                 out_filename = args.xlsx
                 if args.out:
                     out_filename = args.out
                 do_roulette(workbook, args.lunch_date, out_filename)
-            elif args.send_emails or args.dry_run_send_emails:
-                assert args.template, (
-                    "--template argument is required when sending emails"
-                )
-                send_emails(
+            elif args.send_matches:
+                assert (
+                    args.lunch_date
+                ), "--lunch-date argument is required for sending matches"
+                assert (
+                    args.template
+                ), "--template argument is required when sending emails"
+                send_matches(
                     workbook,
                     args.lunch_date,
                     args.template,
-                    dry_run=args.dry_run_send_emails,
+                    dry_run=args.dry_run,
+                )
+            elif args.send_announcement:
+                assert (
+                    args.template
+                ), "--template argument is required when sending emails"
+                send_announcement(
+                    workbook,
+                    args.template,
+                    dry_run=args.dry_run,
                 )
     except PermissionError:
         logger.error(
@@ -142,7 +166,7 @@ def do_roulette(workbook, lunch_date, out_filename):
     )
 
 
-def send_emails(workbook, lunch_date, template_path, dry_run=False):
+def send_matches(workbook, lunch_date, template_path, dry_run=False):
     """
     Send the lunch roulette match emails.
     """
@@ -173,6 +197,32 @@ def send_emails(workbook, lunch_date, template_path, dry_run=False):
     logger.debug(f"Parsed {len(users)} users: {users}")
 
     send_match_emails(users, lunch_date, template_path, dry_run=dry_run)
+
+
+def send_announcement(workbook, template_path, dry_run=False):
+    """
+    Send an announcement to everybody, not only those with matches on a
+    particular day.
+    """
+    # Assume that the active worksheet is the only interesting one.  This
+    # script wasn't written to account for multiple worksheets.
+    worksheet = workbook.active
+
+    columns = parse_worksheet_columns(worksheet)
+    logger.debug(f"Parsed columns from the workbook: {columns}")
+
+    users = load_users(
+        worksheet,
+        columns,
+        [
+            "email",
+            "friendly_name",
+            "frequency",
+        ],
+    )
+    logger.debug(f"Parsed {len(users)} users: {users}")
+
+    send_announcement_emails(users, template_path, dry_run=dry_run)
 
 
 def parse_worksheet_columns(worksheet):
@@ -378,20 +428,50 @@ def send_match_emails(users, lunch_date, template_path, dry_run=False):
                 ".\\lunch-roulette-email.ps1",
                 "-email",
                 f"'{user['email']}'",
-                "-friendlyName",
-                f"'{user['friendly_name']}'",
-                "-lunchDate",
-                f"'{pretty_date}'",
-                "-otherEmail",
-                f"'{match['email']}'",
-                "-otherFriendlyName",
-                f"'{match['friendly_name']}'",
-                "-otherFullName",
-                f"'{match['full_name']}'",
-                "-otherGender",
-                f"'{match['gender']}'",
                 "-template",
                 f"'{template_path}'",
+                "-replacements",
+                "@{"
+                f"'VarFriendlyName'='{user['friendly_name']}'"
+                f"; 'VarLunchDate'='{pretty_date}'"
+                f"; 'VarOtherEmail'='{match['email']}'"
+                f"; 'VarOtherFriendlyName'='{match['friendly_name']}'"
+                f"; 'VarOtherFullName'='{match['full_name']}'"
+                f"; 'VarOtherGender'='{match['gender']}'"
+                "}",
+            ]
+            logger.info(f"Sending email to {user['email']}...")
+
+            if dry_run:
+                print(" ".join(args))
+            else:
+                completed_process = subprocess.run(args)
+                if completed_process.returncode != 0:
+                    logger.error(f"Failed to send email to {user['email']}")
+                    send_failures.append(user)
+
+    if send_failures:
+        logger.error(
+            "Failed to send emails to the following users:"
+            + "\n  ".join([u["email"] for u in send_failures])
+        )
+
+
+def send_announcement_emails(users, template_path, dry_run=False):
+    # Send emails serially, because I doubt that Powershell and Outlook support
+    # sending emails in parallel.
+    send_failures = []  # Tracks the send failures that we encountered.
+    for user in users.values():
+        if user["frequency"] > 0:
+            args = [
+                "powershell.exe",
+                ".\\lunch-roulette-email.ps1",
+                "-email",
+                f"'{user['email']}'",
+                "-template",
+                f"'{template_path}'",
+                "-replacements",
+                "@{" f"'VarFriendlyName'='{user['friendly_name']}'" "}",
             ]
             logger.info(f"Sending email to {user['email']}...")
 

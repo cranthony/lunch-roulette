@@ -58,12 +58,19 @@ roulette.  For example, a frequency of 1 means they'll be matched every class
 week, while a frequency of 1/4 means they'll be matched once every 4 class
 weeks.
 
+### Initializing an email template
+
+The script relies on Outlook, and builds its messages from an Outlook message
+template that you supply on the command line.  You can save a message as an
+Outlook message template with Save As while editing a message, and choosing the
+`oft` file extension.
+
 ### Running the roulette
 
 To run the roulette, run the script with the `--roulette` option:
 
 ```Powershell
-python3 .\lunch-roulette.py --xlsx my.xlsx --lunch-date 20221008 --roulette
+python3 .\lunch-roulette.py --xlsx my.xlsx --template my.oft --lunch-date 20221008 --roulette
 ```
 
 The XLSX file will be updated with a column named `match_20221008` that contains
@@ -73,12 +80,25 @@ column already exists in the XLSX, it will be overwritten.
 
 ### Sending emails for a lunch roulette
 
-To send the emails for a lunch roulette, use the `--send-emails` option.  This
+To send the emails for a lunch roulette, use the `--send-matches` option.  This
 should only be used after the XLSX has already been filled with the matches for
 the given lunch date.
 
 ```
-python3 .\lunch-roulette.py --xlsx my.xlsx --lunch-date 20221008 --send-emails
+python3 .\lunch-roulette.py --xlsx my.xlsx --template my.oft --lunch-date 20221008 --send-matches
+```
+
+You can add the `--dry-run` option if you want to double check that the script
+is working properly before sending the emails.
+
+### Sending an announcement to all subscribed users
+
+To send emails to all users that are considered for lunch roulette, use the
+`--send-announcement` option.  Like `--send-matches`, this option supports
+`--dry-run` to check its results first.
+
+```
+python3 .\lunch-roulette.py --xlsx my.xlsx --template my.oft --send-announcement
 ```
 
 ### Development only: directly sending an email by script
@@ -98,12 +118,15 @@ for the `nobody@` address below:
 ```Powershell
 .\lunch-roulette-email.ps1 `
     -email 'nobody@dontspamme.com' `
-    -friendlyName Chris `
-    -lunchDate 'Saturday, October 8, 2022' `
-    -otherEmail 'nobody@dontspamme.com' `
-    -otherFriendlyName 'NotChris' `
-    -otherFullName 'NotChris NotAnthony' `
-    -otherGender 'male'
+    -template .\my-template.oft
+    -replacements @{ `
+        'VarFriendlyName' = 'Chris' `
+        ;'VarLunchDate' = 'Saturday, October 8, 2022' `
+        ;'VarOtherEmail' = 'nobody@dontspamme.com' `
+        ;'VarOtherFriendlyName' = 'John' `
+        ;'VarOtherFullName' = 'Smith' `
+        ;'VarOtherGender' = 'male' `
+    }
 ```
 
 Outlook should already be opened, before running the script.
