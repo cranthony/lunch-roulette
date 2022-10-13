@@ -191,6 +191,7 @@ def send_matches(workbook, lunch_date, template_path, dry_run=False):
             "friendly_name",
             "full_name",
             "gender",
+            "frequency",
             match_column_header,
         ],
     )
@@ -421,7 +422,7 @@ def send_match_emails(users, lunch_date, template_path, dry_run=False):
     pretty_date = lunch_date.strftime("%A %B %d, %Y")
     send_failures = []  # Tracks the send failures that we encountered.
     for user in users.values():
-        if user[match_column_header]:
+        if user[match_column_header] and user["frequency"] > 0:
             match = users_by_email[user[match_column_header]]
             args = [
                 "powershell.exe",
