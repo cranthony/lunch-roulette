@@ -149,9 +149,10 @@ def do_roulette(workbook, lunch_date, out_filename):
     logger.debug(f"Parsed {len(users)} users: {users}")
 
     # We don't really support frequency at the moment.  We only filter out those
-    # users that have a frequency of 0.
+    # users that have a frequency of 0.  We also allow 2 as a placeholder for
+    # those students that may be willing to meet more frequently.
     users = {k: v for k, v in users.items() if v["frequency"]}
-    assert all([v["frequency"] in [None, 0, 1] for v in users.values()])
+    assert all([v["frequency"] in [None, 0, 1, 2] for v in users.values()])
 
     matches = match_users(users)
     logger.debug(f"Matches: {matches}")
