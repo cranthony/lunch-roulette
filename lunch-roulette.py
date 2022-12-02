@@ -144,7 +144,9 @@ def do_roulette(workbook, lunch_date, out_filename):
     logger.debug(f"Parsed columns from the workbook: {columns}")
 
     users = load_users(
-        worksheet, columns, ["email", "frequency", "cluster", "new_to_cluster"]
+        worksheet,
+        columns,
+        ["email", "frequency", "cluster", "new_to_cluster", "all_matches"],
     )
     logger.debug(f"Parsed {len(users)} users: {users}")
 
@@ -193,6 +195,7 @@ def send_matches(workbook, lunch_date, template_path, dry_run=False):
             "full_name",
             "gender",
             "frequency",
+            "all_matches",
             match_column_header,
         ],
     )
@@ -296,6 +299,7 @@ def load_users(worksheet, columns, load_columns):
     """
     users = {}  # Key is user row number, value is a dictionary with user
     # information
+    emails = {}  # Key is email, value is user ID
 
     columns = {
         k: v for k, v in columns.items() if k in load_columns + ["email"]
@@ -306,7 +310,9 @@ def load_users(worksheet, columns, load_columns):
     while value:
         users[row_number] = {
             "email": value,
+            "id": row_number,
         }
+        emails[value] = row_number
         user = users[row_number]
         for column in columns:
             if columns[column] is None:
@@ -314,6 +320,17 @@ def load_users(worksheet, columns, load_columns):
                 # column easily, without needing to first check if the key
                 # exists.
                 user[column] = None
+            elif column == "all_matches":
+                # The "all_matches" is special and contains a list of all of
+                # match columns.
+                if column not in user:
+                    user[column] = []
+                for match_col in columns[column]:
+                    value = worksheet.cell(
+                        row=row_number, column=match_col
+                    ).value
+                    if value is not None:
+                        user[column] += value.split(";")
             else:
                 user[column] = worksheet.cell(
                     row=row_number, column=columns[column]
@@ -321,6 +338,14 @@ def load_users(worksheet, columns, load_columns):
 
         row_number += 1
         value = worksheet.cell(row=row_number, column=columns["email"]).value
+
+    # all_matches, if there, contains emails.  Convert to IDs.
+    for id, user in users.items():
+        if "all_matches" in user:
+            match_ids = []
+            for match_email in user["all_matches"]:
+                match_ids.append(emails[match_email])
+            user["all_matches"] = match_ids
 
     return users
 
@@ -341,6 +366,11 @@ def match_users(users):
     users_by_score = defaultdict(set)
 
     def score_match(user_a, user_b):
+        # Avoid matching people that have already been matched.
+        if user_a["id"] in user_b["all_matches"]:
+            user_b["id"] in user_a["all_matches"]
+            return -1
+
         if user_a["new_to_cluster"] or user_b["new_to_cluster"]:
             return 2 if user_a["cluster"] == user_b["cluster"] else 1
 
@@ -398,9 +428,9 @@ def update_worksheet_with_matches(
     # First make the new match header, at the end of the sheet so as not to
     # invalidate any of our other indices.
     match_column = columns["first_empty"]
-    worksheet.cell(
-        row=1, column=match_column
-    ).value = make_match_column_header(lunch_date)
+    worksheet.cell(row=1, column=match_column).value = make_match_column_header(
+        lunch_date
+    )
 
     # Now go through each match and write it into the spreadsheet.
     for match in matches:
