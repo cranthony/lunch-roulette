@@ -264,9 +264,12 @@ def parse_worksheet_columns(worksheet):
 
         # Save all of the match columns.
         if is_match_column_header(value):
-            columns[value] = column_number
+            # Match columns can be duplicated, to signify that some people got more than one match.
+            if value not in columns:
+                columns[value] = []
+            columns[value].append(column_number)
             columns["all_matches"].append(column_number)
-        if value in columns and value not in ["first_empty"]:
+        elif value in columns and value not in ["first_empty"]:
             columns[value] = column_number
 
         column_number += 1
@@ -307,6 +310,7 @@ def load_users(worksheet, columns, load_columns):
 
     row_number = 2  # Skip the header row (see parse_worksheet_columns)
     value = worksheet.cell(row=row_number, column=columns["email"]).value
+    match_columns = set()
     while value:
         users[row_number] = {
             "email": value,
@@ -320,17 +324,17 @@ def load_users(worksheet, columns, load_columns):
                 # column easily, without needing to first check if the key
                 # exists.
                 user[column] = None
-            elif column == "all_matches":
-                # The "all_matches" is special and contains a list of all of
-                # match columns.
+            elif column == "all_matches" or is_match_column_header(column):
+                # Match columns are special and contain a list of all of columns.
                 if column not in user:
                     user[column] = []
+                    match_columns.add(column)
                 for match_col in columns[column]:
                     value = worksheet.cell(
                         row=row_number, column=match_col
                     ).value
                     if value is not None:
-                        user[column] += value.split(";")
+                        user[column].append(value)
             else:
                 user[column] = worksheet.cell(
                     row=row_number, column=columns[column]
@@ -339,13 +343,14 @@ def load_users(worksheet, columns, load_columns):
         row_number += 1
         value = worksheet.cell(row=row_number, column=columns["email"]).value
 
-    # all_matches, if there, contains emails.  Convert to IDs.
+    # Convert the emails from the match columns into IDs.
     for id, user in users.items():
-        if "all_matches" in user:
-            match_ids = []
-            for match_email in user["all_matches"]:
-                match_ids.append(emails[match_email])
-            user["all_matches"] = match_ids
+        for match_column in match_columns:
+            if match_column in user:
+                match_ids = []
+                for match_email in user[match_column]:
+                    match_ids.append(emails[match_email])
+                user[match_column] = match_ids
 
     return users
 
@@ -445,7 +450,7 @@ def send_match_emails(users, lunch_date, template_path, dry_run=False):
     """
     # Make a dictionary mapping the users' email address back to their row
     # numbers.  We'll use this for getting the match information.
-    users_by_email = {v["email"]: v for v in users.values()}
+    users_by_id = {v["id"]: v for v in users.values()}
     match_column_header = make_match_column_header(lunch_date)
 
     # Send emails serially, because I doubt that Powershell and Outlook support
@@ -454,7 +459,28 @@ def send_match_emails(users, lunch_date, template_path, dry_run=False):
     send_failures = []  # Tracks the send failures that we encountered.
     for user in users.values():
         if user[match_column_header] and user["frequency"] > 0:
-            match = users_by_email[user[match_column_header]]
+            matches = [
+                users_by_id[match_id] for match_id in user[match_column_header]
+            ]
+
+            def join_emails(matches):
+                # https://www.rfc-editor.org/rfc/rfc6068#section-2 says that commas
+                # are valid delimiters.  This may not be implemented in all email
+                # clients, though.
+                return ",".join(m["email"] for m in matches)
+
+            def join_names(matches, key):
+                if len(matches) <= 2:
+                    return " and ".join(m[key] for m in matches)
+                else:
+                    return (
+                        ", ".join(m[key] for m in matches[:-1])
+                        + f", and {matches[-1][key]}"
+                    )
+
+            def join_genders(matches):
+                return matches[0]["gender"] if len(matches) == 1 else "plural"
+
             args = [
                 "powershell.exe",
                 ".\\lunch-roulette-email.ps1",
@@ -466,10 +492,10 @@ def send_match_emails(users, lunch_date, template_path, dry_run=False):
                 "@{"
                 f"'VarFriendlyName'='{user['friendly_name']}'"
                 f"; 'VarLunchDate'='{pretty_date}'"
-                f"; 'VarOtherEmail'='{match['email']}'"
-                f"; 'VarOtherFriendlyName'='{match['friendly_name']}'"
-                f"; 'VarOtherFullName'='{match['full_name']}'"
-                f"; 'VarOtherGender'='{match['gender']}'"
+                f"; 'VarOtherEmail'='{join_emails(matches)}'"
+                f"; 'VarOtherFriendlyName'='{join_names(matches, 'friendly_name')}'"
+                f"; 'VarOtherFullName'='{join_names(matches, 'full_name')}'"
+                f"; 'VarOtherGender'='{join_genders(matches)}'"
                 "}",
             ]
             logger.info(f"Sending email to {user['email']}...")

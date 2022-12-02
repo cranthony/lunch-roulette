@@ -3,11 +3,11 @@
 #
 # And then I looked up a bunch of tutorials on Powershell to get the rest.
 param(
-  [Parameter(Mandatory=$true)] [ValidateNotNullOrEmpty()] [String]$email,
-  [Parameter(Mandatory=$true)] [ValidateNotNullOrEmpty()] [String]$template,
+  [Parameter(Mandatory = $true)] [ValidateNotNullOrEmpty()] [String]$email,
+  [Parameter(Mandatory = $true)] [ValidateNotNullOrEmpty()] [String]$template,
   # Every key in this hash table should match the pattern given by
   # $variablePattern.
-  [Parameter(Mandatory=$true)] [ValidateNotNullOrEmpty()] [hashtable]$replacements,
+  [Parameter(Mandatory = $true)] [ValidateNotNullOrEmpty()] [hashtable]$replacements,
   # Note that we don't URLEncode this string or anything like that when doing
   # replacements, so prefer patterns that aren't affected by such encodings.
   #
@@ -38,12 +38,10 @@ $ErrorActionPreference = "Stop"
 # Connect to Outlook.
 Add-Type -assembly "Microsoft.Office.Interop.Outlook"
 add-type -assembly "System.Runtime.Interopservices"
-try
-{
+try {
   $outlook = [Runtime.Interopservices.Marshal]::GetActiveObject('Outlook.Application')
 }
-catch
-{
+catch {
   # The example that I followed would start Outlook if it wasn't running, but
   # I don't really want that.  I don't want to accidentally lock up my computer
   # by starting a script that sends 100 emails, and watching each start and
@@ -68,9 +66,11 @@ $pronounTypes = @("Subject", "Object", "Possessive")
 $pronouns = @{
   # The order of each of the value arrays matches the order of pronoun types in
   # $pronounTypes.
-  'male' = @('he', 'him', 'his')
-  'female' = @('she', 'her', 'her')
+  'male'      = @('he', 'him', 'his')
+  'female'    = @('she', 'her', 'her')
   'nonbinary' = @('they', 'them', 'their')
+  'plural'    = @('they', 'them', 'their')
+  'unknown'   = @('they', 'them', 'their')
 }
 $genderReplacements = @{}
 $replacements.GetEnumerator() | ForEach-Object {
@@ -108,7 +108,7 @@ $replacements.GetEnumerator() | ForEach-Object {
 # Validate that the caller supplied all of the variables that we'd expect.
 @{
   "Message subject" = $message.Subject
-  "Message body" = $message.HTMLBody
+  "Message body"    = $message.HTMLBody
 }.GetEnumerator() | ForEach-Object {
   $unmatchedVariables = $variablePattern.Matches($_.Value)
   if ($unmatchedVariables.Count -gt 0) {
